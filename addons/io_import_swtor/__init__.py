@@ -20,7 +20,7 @@ bl_info = {
     "location": "File > Import",
     "description": "Import GR2 meshes",
     "warning": "",
-    "doc_url": "",
+    "doc_url": "https://github.com/GarmOfGnipahellir/blender-swtor-importer",
     "support": 'COMMUNITY',
     "category": "Import-Export",
 }
