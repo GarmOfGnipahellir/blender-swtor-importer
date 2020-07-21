@@ -15,7 +15,7 @@ from bpy_extras.io_utils import (
 bl_info = {
     "name": "SWTOR GR2 Format",
     "author": "Henrik Melsom",
-    "version": (0, 1, 0),
+    "version": (0, 2, 0),
     "blender": (2, 83, 0),
     "location": "File > Import",
     "description": "Import GR2 meshes",
@@ -35,8 +35,17 @@ class ImportGR2(bpy.types.Operator, ImportHelper):
     filename_ext = ".gr2"
     filter_glob: StringProperty(default="*.gr2", options={'HIDDEN'})
 
-    auto_import_skeleton: BoolProperty(
-        name="Auto Import Skeleton (Experimental)", default=False)
+    import_collision: BoolProperty(
+        name="Import Collision", default=False)
+
+    import_skeleton: BoolProperty(
+        name="Import Skeleton (Experimental)", default=False)
+
+    import_materials: BoolProperty(
+        name="Import Materials (Experimental)", default=False)
+
+    import_textures: BoolProperty(
+        name="Import Textures (Experimental)", default=False)
 
     def execute(self, context):
         from . import import_gr2

@@ -5,7 +5,7 @@ import bmesh
 import math
 import os
 from mathutils import Matrix, Vector
-from .utils import read_byte, read_bytes, read_u16, read_u32, read_i32, read_f16, read_f32
+from .utils import read_byte, read_bytes, read_u16, read_u32, read_i32, read_f16, read_f32, find_parent_dir
 
 
 def read_offset_string(fp, offset):
@@ -110,9 +110,68 @@ class GR2Mesh():
         for i in range(self.num_pieces):
             self.pieces.append(GR2MeshPiece(fp, fp.tell()))
 
+    def build(self, mesh_loader, skel_loader=None):
+        me = bpy.data.meshes.new(self.name)
+        obj = bpy.data.objects.new(self.name, me)
+        bpy.context.collection.objects.link(obj)
+        obj.matrix_local = Matrix.Rotation(math.pi * 0.5, 4, [1, 0, 0])
+
+        bm = bmesh.new()
+        
+        for i, v in enumerate(self.vertices):
+            vert = bm.verts.new()
+            vert.index = i
+            vert.co = list(v)
+        bm.verts.ensure_lookup_table()
+
+        for p in self.pieces:
+            mat = mesh_loader.materials[p.material_id]
+            if mat.name not in bpy.data.materials:
+                bpy.data.materials.new(name=mat.name).use_nodes = True
+            material = bpy.data.materials[mat.name]
+            if material not in obj.data.materials.items():
+                obj.data.materials.append(material)
+            material_index = obj.data.materials.find(mat.name)
+            for i in range(p.start_index, p.start_index + p.num_faces):
+                f = self.faces[i]
+                face = bm.faces.new([bm.verts[v] for v in list(f)])
+                face.index = i
+                face.material_index = material_index
+        bm.faces.ensure_lookup_table()
+
+        if self.vertex_size >= 24:
+            uv_layer = bm.loops.layers.uv.new()
+            for face in bm.faces:
+                for loop in face.loops:
+                    v = self.vertices[loop.vert.index]
+                    loop[uv_layer].uv = Vector([v.u, 1-v.v])
+
+        bm.to_mesh(me)
+        bm.free()
+
+        # TODO figure out how bone weights are stored
+        # if self.vertex_size == 32 and skel_loader != None:
+        #     for i, v in enumerate(self.vertices):
+        #         for j in range(4):
+        #             b = skel_loader.bones[v.bones[j]]
+
+        #             if not b.name in obj.vertex_groups:
+        #                 obj.vertex_groups.new(name=b.name)
+        #                 # print(i)
+        #                 # print(" ", v.bones[j])
+        #                 # print(" ", v.weights[j])
+        #                 # print(" ", b.name)
+
+        #             obj.vertex_groups[b.name].add(
+        #                 [i], v.weights[j] / 255, 'ADD')
+
+        #     mod = obj.modifiers.new(name="Armature", type='ARMATURE')
+        #     mod.object = skel_loader.armature
+
 
 class GR2Material():
     def __init__(self, fp, offset):
+        self.mesh_filepath = fp.name
         r = fp.read
 
         fp.seek(offset)
@@ -120,6 +179,56 @@ class GR2Material():
         self.offset_name = read_u32(r)
 
         self.name = read_offset_string(fp, self.offset_name)
+
+        self.textures = {}
+
+    def parse(self):
+        art_dir = find_parent_dir(self.mesh_filepath, "art")
+        materials_dir = os.path.join(art_dir, "shaders", "materials")
+        material_path = os.path.join(materials_dir, f"{self.name}.mat")
+        if self.name == "default":
+            mesh_filename = os.path.split(self.mesh_filepath)[1][:-4]
+            material_path = os.path.join(
+                materials_dir, f"{mesh_filename}.mat")
+            if not os.path.exists(material_path):
+                print("Couldn't find file:", material_path)
+                material_path = os.path.join(
+                    materials_dir, f"{mesh_filename}_v01.mat")
+        if not os.path.exists(material_path):
+            print("Couldn't find file:", material_path)
+            return
+
+        from xml.etree import ElementTree
+        tree = ElementTree.parse(material_path)
+        for child in tree.getroot():
+            if not child.tag == "input":
+                continue
+            if not child.findtext("type") == "texture":
+                continue
+            semantic = child.findtext("semantic")
+            value = child.findtext("value")
+
+            self.textures[semantic] = value
+
+    def build(self, import_textures):
+        if self.name in bpy.data.materials:
+            return
+
+        material = bpy.data.materials.new(name=self.name)
+        material.use_nodes = True
+        p_bsdf = material.node_tree.nodes["Principled BSDF"]
+        p_bsdf.inputs[5].default_value = 0.0
+
+        if import_textures and "DiffuseMap" in self.textures:
+            resources_dir = find_parent_dir(
+                self.mesh_filepath, "resources")
+
+            tex_node = material.node_tree.nodes.new(
+                'ShaderNodeTexImage')
+            tex_node.image = bpy.data.images.load(
+                os.path.join(resources_dir, f"{self.textures['DiffuseMap']}.dds"))
+            material.node_tree.links.new(
+                p_bsdf.inputs['Base Color'], tex_node.outputs['Color'])
 
 
 class GR2Attachment():
@@ -199,53 +308,11 @@ class GR2Loader():
                 self.bones.append(
                     GR2Bone(fp, self.offset_bone_structure + i * 0x88))
 
-    def build(self, skel_loader=None):
+    def build(self, skel_loader=None, import_collision=False):
         for m in self.meshes:
-            me = bpy.data.meshes.new(m.name)
-            me.from_pydata([list(v) for v in m.vertices],
-                           [], [list(v) for v in m.faces])
-
-            if m.vertex_size >= 24:
-                me.use_auto_smooth = True
-                me.normals_split_custom_set_from_vertices(
-                    [[(x / 255) * 2 - 1 for x in v.normal[:3]] for v in m.vertices])
-
-                uv_layer = me.uv_layers.new().data
-                for i, poly in enumerate(me.polygons):
-                    loop_indices = list(poly.loop_indices)
-                    for j, loop_index in enumerate(loop_indices):
-                        v = m.vertices[list(m.faces[i])[j]]
-                        uv_layer[loop_index].uv = [v.u, 1-v.v]
-
-                uv_layer = me.uv_layers.new().data
-                for i, poly in enumerate(me.polygons):
-                    loop_indices = list(poly.loop_indices)
-                    for j, loop_index in enumerate(loop_indices):
-                        v = m.vertices[list(m.faces[i])[j]]
-                        uv_layer[loop_index].uv = [v.u, 1-v.v]
-
-            obj = bpy.data.objects.new(m.name, me)
-            bpy.context.collection.objects.link(obj)
-            obj.matrix_local = Matrix.Rotation(math.pi * 0.5, 4, [1, 0, 0])
-
-            # TODO figure out how bone weights are stored
-            if m.vertex_size == 32 and skel_loader != None:
-                for i, v in enumerate(m.vertices):
-                    for j in range(4):
-                        b = skel_loader.bones[v.bones[j]]
-
-                        if not b.name in obj.vertex_groups:
-                            obj.vertex_groups.new(name=b.name)
-                            # print(i)
-                            # print(" ", v.bones[j])
-                            # print(" ", v.weights[j])
-                            # print(" ", b.name)
-
-                        obj.vertex_groups[b.name].add(
-                            [i], v.weights[j] / 255, 'ADD')
-
-                mod = obj.modifiers.new(name="Armature", type='ARMATURE')
-                mod.object = skel_loader.armature
+            if "collision" in m.name and not import_collision:
+                continue
+            m.build(self, skel_loader)
 
         if len(self.bones) > 0:
             bpy.ops.object.add(type='ARMATURE', enter_editmode=True)
@@ -296,7 +363,7 @@ def convert_dict(o):
 
 def load(operator, context, filepath=""):
     skel_loader = None
-    if operator.auto_import_skeleton and "dynamic" in filepath:
+    if operator.import_skeleton and "dynamic" in filepath:
         # get the dynamic dir path
         dynamic_dir, mesh_filename = os.path.split(filepath)
         while not dynamic_dir.endswith("dynamic"):
@@ -316,6 +383,11 @@ def load(operator, context, filepath=""):
 
     main_loader = GR2Loader(filepath)
     main_loader.parse()
-    main_loader.build(skel_loader)
+    if operator.import_materials:
+        for mat in main_loader.materials:
+            print(mat.__dict__)
+            mat.parse()
+            mat.build(operator.import_textures)
+    main_loader.build(skel_loader, operator.import_collision)
 
     return {'FINISHED'}

@@ -1,6 +1,7 @@
 # from http://wiki.xentax.com/index.php/Blender_Import_Guide
 
 # Convenience functions
+import os
 from struct import pack, unpack
 
 
@@ -64,3 +65,10 @@ def read_f16(read):
 
 def read_f32(read):
     return unpack(b'<f', read(4))[0]
+
+
+def find_parent_dir(path, name):
+    """Searches parent directories until `name` is found"""
+    while not path.endswith(name):
+        path = os.path.split(path)[0]
+    return path
