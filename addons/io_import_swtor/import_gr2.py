@@ -122,6 +122,8 @@ class GR2Mesh():
             vert = bm.verts.new()
             vert.index = i
             vert.co = list(v)
+            if self.vertex_size >= 24:
+                vert.normal = Vector([(x / 255) * 2 - 1 for x in v.normal[:3]])
         bm.verts.ensure_lookup_table()
 
         for p in self.pieces:
@@ -148,6 +150,12 @@ class GR2Mesh():
 
         bm.to_mesh(me)
         bm.free()
+
+        # fix normals
+        if self.vertex_size >= 24:
+            me.use_auto_smooth = True
+            me.normals_split_custom_set_from_vertices(
+                [[(x / 255) * 2 - 1 for x in v.normal[:3]] for v in self.vertices])
 
         # TODO figure out how bone weights are stored
         # if self.vertex_size == 32 and skel_loader != None:
