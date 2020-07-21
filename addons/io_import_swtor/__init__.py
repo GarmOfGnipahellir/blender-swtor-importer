@@ -15,7 +15,7 @@ from bpy_extras.io_utils import (
 bl_info = {
     "name": "SWTOR GR2 Format",
     "author": "Henrik Melsom",
-    "version": (0, 2, 1),
+    "version": (0, 3, 0),
     "blender": (2, 83, 0),
     "location": "File > Import",
     "description": "Import GR2 meshes",

@@ -74,6 +74,18 @@ class GR2MeshPiece():
         fp.read(4*8)  # bounding box
 
 
+class GR2MeshBone():
+    def __init__(self, fp, offset):
+        r = fp.read
+
+        fp.seek(offset)
+
+        self.offset_name = read_u32(r)
+        self.unknown_floats = [read_f32(r) for i in range(6)]
+
+        self.name = read_offset_string(fp, self.offset_name)
+
+
 class GR2Mesh():
     def __init__(self, fp, offset):
         r = fp.read
@@ -110,6 +122,10 @@ class GR2Mesh():
         for i in range(self.num_pieces):
             self.pieces.append(GR2MeshPiece(fp, fp.tell()))
 
+        self.bones = []
+        for i in range(self.num_used_bones):
+            self.bones.append(GR2MeshBone(fp, self.offset_bones + i * 4 * 7))
+
     def build(self, mesh_loader, skel_loader=None):
         me = bpy.data.meshes.new(self.name)
         obj = bpy.data.objects.new(self.name, me)
@@ -117,7 +133,7 @@ class GR2Mesh():
         obj.matrix_local = Matrix.Rotation(math.pi * 0.5, 4, [1, 0, 0])
 
         bm = bmesh.new()
-        
+
         for i, v in enumerate(self.vertices):
             vert = bm.verts.new()
             vert.index = i
@@ -157,24 +173,20 @@ class GR2Mesh():
             me.normals_split_custom_set_from_vertices(
                 [[(x / 255) * 2 - 1 for x in v.normal[:3]] for v in self.vertices])
 
-        # TODO figure out how bone weights are stored
-        # if self.vertex_size == 32 and skel_loader != None:
-        #     for i, v in enumerate(self.vertices):
-        #         for j in range(4):
-        #             b = skel_loader.bones[v.bones[j]]
+        # add skinning information
+        if self.vertex_size == 32 and skel_loader != None:
+            for i, v in enumerate(self.vertices):
+                for j in range(4):
+                    b = self.bones[v.bones[j]]
 
-        #             if not b.name in obj.vertex_groups:
-        #                 obj.vertex_groups.new(name=b.name)
-        #                 # print(i)
-        #                 # print(" ", v.bones[j])
-        #                 # print(" ", v.weights[j])
-        #                 # print(" ", b.name)
+                    if not b.name in obj.vertex_groups:
+                        obj.vertex_groups.new(name=b.name)
 
-        #             obj.vertex_groups[b.name].add(
-        #                 [i], v.weights[j] / 255, 'ADD')
+                    obj.vertex_groups[b.name].add(
+                        [i], v.weights[j] / 255, 'ADD')
 
-        #     mod = obj.modifiers.new(name="Armature", type='ARMATURE')
-        #     mod.object = skel_loader.armature
+            mod = obj.modifiers.new(name="Armature", type='ARMATURE')
+            mod.object = skel_loader.armature
 
 
 class GR2Material():
@@ -339,12 +351,6 @@ class GR2Loader():
 
             for i, b in enumerate(self.bones):
                 bone = armature.edit_bones[i]
-
-                # if b.parent_index >= 0:
-                #     matrix = Matrix(
-                #         [self.bones[b.parent_index].unknown_floats[j*4:j*4+4]for j in range(4)])
-                #     matrix.transpose()
-                #     bone.transform(matrix)
 
                 matrix = Matrix([b.unknown_floats[j*4+16:j*4+4+16]
                                  for j in range(4)])
