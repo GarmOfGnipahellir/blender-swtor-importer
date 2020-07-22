@@ -19,7 +19,6 @@ def half_to_float(h):
                 e -= 1
             e += 1
             f &= ~0x00000400
-            print(s, e, f)
     elif e == 31:
         if f == 0:
             return int((s << 31) | 0x7f800000)

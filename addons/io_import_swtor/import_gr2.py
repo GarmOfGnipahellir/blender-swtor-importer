@@ -138,8 +138,6 @@ class GR2Mesh():
             vert = bm.verts.new()
             vert.index = i
             vert.co = list(v)
-            if self.vertex_size >= 24:
-                vert.normal = Vector([(x / 255) * 2 - 1 for x in v.normal[:3]])
         bm.verts.ensure_lookup_table()
 
         for p in self.pieces:
@@ -157,21 +155,25 @@ class GR2Mesh():
                 face.material_index = material_index
         bm.faces.ensure_lookup_table()
 
-        if self.vertex_size >= 24:
+        try:
             uv_layer = bm.loops.layers.uv.new()
             for face in bm.faces:
                 for loop in face.loops:
                     v = self.vertices[loop.vert.index]
                     loop[uv_layer].uv = Vector([v.u, 1-v.v])
+        except AttributeError:
+            print("No uvs on", self.name)
 
         bm.to_mesh(me)
         bm.free()
 
         # fix normals
-        if self.vertex_size >= 24:
+        try:
             me.use_auto_smooth = True
             me.normals_split_custom_set_from_vertices(
                 [[(x / 255) * 2 - 1 for x in v.normal[:3]] for v in self.vertices])
+        except AttributeError:
+            print("No normals on", self.name)
 
         # add skinning information
         if self.vertex_size == 32 and skel_loader != None:
@@ -239,7 +241,7 @@ class GR2Material():
         p_bsdf = material.node_tree.nodes["Principled BSDF"]
         p_bsdf.inputs[5].default_value = 0.0
 
-        if import_textures and "DiffuseMap" in self.textures:
+        try:
             resources_dir = find_parent_dir(
                 self.mesh_filepath, "resources")
 
@@ -249,6 +251,8 @@ class GR2Material():
                 os.path.join(resources_dir, f"{self.textures['DiffuseMap']}.dds"))
             material.node_tree.links.new(
                 p_bsdf.inputs['Base Color'], tex_node.outputs['Color'])
+        except RuntimeError as e:
+            print(e)
 
 
 class GR2Attachment():
@@ -392,14 +396,12 @@ def load(operator, context, filepath=""):
         # load the skeleton as armature
         skel_loader = GR2Loader(skel_filepath)
         skel_loader.parse()
-        print(skel_loader.num_bones)
         skel_loader.build()
 
     main_loader = GR2Loader(filepath)
     main_loader.parse()
     if operator.import_materials:
         for mat in main_loader.materials:
-            print(mat.__dict__)
             mat.parse()
             mat.build(operator.import_textures)
     main_loader.build(skel_loader, operator.import_collision)
