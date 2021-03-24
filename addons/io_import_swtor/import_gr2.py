@@ -241,16 +241,26 @@ class GR2Material():
         p_bsdf = material.node_tree.nodes["Principled BSDF"]
         p_bsdf.inputs[5].default_value = 0.0
 
-        try:
-            resources_dir = find_parent_dir(
-                self.mesh_filepath, "resources")
+        resources_dir = find_parent_dir(
+            self.mesh_filepath, "resources")
 
+        try: # adding diffuse map
             tex_node = material.node_tree.nodes.new(
                 'ShaderNodeTexImage')
             tex_node.image = bpy.data.images.load(
                 os.path.join(resources_dir, f"{self.textures['DiffuseMap']}.dds"))
             material.node_tree.links.new(
                 p_bsdf.inputs['Base Color'], tex_node.outputs['Color'])
+        except RuntimeError as e:
+            print(e)
+        
+        try: # adding normal map
+            tex_node = material.node_tree.nodes.new(
+                'ShaderNodeTexImage')
+            tex_node.image = bpy.data.images.load(
+                os.path.join(resources_dir, f"{self.textures['RotationMap1']}.dds"))
+            material.node_tree.links.new(
+                p_bsdf.inputs['Normal'], tex_node.outputs['Color'])
         except RuntimeError as e:
             print(e)
 
